@@ -998,4 +998,4 @@ var CameraControls = (function (_super) {
     return CameraControls;
 }(EventDispatcher));
 
-export default CameraControls;
+export { CameraControls, SIDES };

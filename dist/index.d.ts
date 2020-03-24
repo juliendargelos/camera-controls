@@ -1,2 +1,2 @@
-import { CameraControls } from './CameraControls';
-export default CameraControls;
+export { CameraControls } from './CameraControls';
+export { SIDES } from './constants';
