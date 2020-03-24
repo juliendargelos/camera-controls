@@ -47,15 +47,28 @@ var ACTION;
     ACTION[ACTION["TOUCH_DOLLY_TRUCK"] = 9] = "TOUCH_DOLLY_TRUCK";
     ACTION[ACTION["TOUCH_ZOOM_TRUCK"] = 10] = "TOUCH_ZOOM_TRUCK";
 })(ACTION || (ACTION = {}));
+var SIDE;
+(function (SIDE) {
+    SIDE["UP"] = "up";
+    SIDE["DOWN"] = "down";
+    SIDE["RIGHT"] = "right";
+    SIDE["LEFT"] = "left";
+    SIDE["FRONT"] = "front";
+    SIDE["BACK"] = "back";
+})(SIDE || (SIDE = {}));
 
+var _a;
 var PI_2 = Math.PI * 2;
+var PI_HALF = Math.PI / 2;
 var FPS_60 = 1 / 0.016;
-var FIT_TO_OPTION_DEFAULT = {
-    paddingLeft: 0,
-    paddingRight: 0,
-    paddingBottom: 0,
-    paddingTop: 0,
-};
+var SIDES = (_a = {},
+    _a[SIDE.FRONT] = { polarAngle: PI_HALF, azimuthAngle: 0 },
+    _a[SIDE.BACK] = { polarAngle: PI_HALF, azimuthAngle: Math.PI },
+    _a[SIDE.UP] = { polarAngle: -PI_HALF, azimuthAngle: 0 },
+    _a[SIDE.DOWN] = { polarAngle: Math.PI, azimuthAngle: 0 },
+    _a[SIDE.RIGHT] = { polarAngle: PI_HALF, azimuthAngle: PI_HALF },
+    _a[SIDE.LEFT] = { polarAngle: PI_HALF, azimuthAngle: -PI_HALF },
+    _a);
 
 var EPSILON = 1e-5;
 function approxZero(number) {
@@ -157,11 +170,16 @@ var _v2;
 var _v3A;
 var _v3B;
 var _v3C;
+var _v3D;
+var _v3E;
 var _xColumn;
 var _yColumn;
 var _sphericalA;
 var _sphericalB;
+var _box2;
 var _box3;
+var _plane;
+var _quaternion;
 var _rotationMatrix;
 var _raycaster;
 var CameraControls = (function (_super) {
@@ -489,11 +507,16 @@ var CameraControls = (function (_super) {
         _v3A = new THREE.Vector3();
         _v3B = new THREE.Vector3();
         _v3C = new THREE.Vector3();
+        _v3D = new THREE.Vector3();
+        _v3E = new THREE.Vector3();
         _xColumn = new THREE.Vector3();
         _yColumn = new THREE.Vector3();
         _sphericalA = new THREE.Spherical();
         _sphericalB = new THREE.Spherical();
+        _box2 = new THREE.Box3();
         _box3 = new THREE.Box3();
+        _plane = new THREE.Plane();
+        _quaternion = new THREE.Quaternion();
         _rotationMatrix = new THREE.Matrix4();
         _raycaster = new THREE.Raycaster();
     };
@@ -612,29 +635,49 @@ var CameraControls = (function (_super) {
         }
         this._needsUpdate = true;
     };
-    CameraControls.prototype.fitTo = function (box3OrObject, enableTransition, options) {
-        if (options === void 0) { options = FIT_TO_OPTION_DEFAULT; }
+    CameraControls.prototype.fitTo = function (box3OrObject, enableTransition, _a) {
+        var _b = _a === void 0 ? {} : _a, _c = _b.side, side = _c === void 0 ? SIDE.FRONT : _c, _d = _b.azimuthAngle, azimuthAngle = _d === void 0 ? SIDES[side].azimuthAngle : _d, _e = _b.polarAngle, polarAngle = _e === void 0 ? SIDES[side].polarAngle : _e, _f = _b.paddingLeft, paddingLeft = _f === void 0 ? 0 : _f, _g = _b.paddingRight, paddingRight = _g === void 0 ? 0 : _g, _h = _b.paddingBottom, paddingBottom = _h === void 0 ? 0 : _h, _j = _b.paddingTop, paddingTop = _j === void 0 ? 0 : _j;
         if (notSupportedInOrthographicCamera(this._camera, 'fitTo'))
             return;
-        var paddingLeft = options.paddingLeft || 0;
-        var paddingRight = options.paddingRight || 0;
-        var paddingBottom = options.paddingBottom || 0;
-        var paddingTop = options.paddingTop || 0;
-        var boundingBox = box3OrObject.isBox3 ? _box3.copy(box3OrObject) :
-            _box3.setFromObject(box3OrObject);
-        var size = boundingBox.getSize(_v3A);
-        var boundingWidth = size.x + paddingLeft + paddingRight;
-        var boundingHeight = size.y + paddingTop + paddingBottom;
-        var boundingDepth = size.z;
-        var distance = this.getDistanceToFit(boundingWidth, boundingHeight, boundingDepth);
+        var box = box3OrObject.isBox3
+            ? _box3.copy(box3OrObject)
+            : _box3.setFromObject(box3OrObject);
+        var size = box.getSize(_v3A);
+        var center = box.getCenter(_v3B);
+        var radius = Math.max(size.x, size.y, size.z) / 2;
+        var theta = THREE.Math.clamp(azimuthAngle, this.minAzimuthAngle, this.maxAzimuthAngle);
+        var phi = THREE.Math.clamp(polarAngle, this.minPolarAngle, this.maxPolarAngle);
+        _sphericalA.set(radius, phi, theta);
+        var sphericalPosition = _v3C.setFromSpherical(_sphericalA).applyQuaternion(this._yAxisUpSpaceInverse);
+        var normal = _v3D.copy(sphericalPosition).normalize();
+        var plane = _plane.setFromNormalAndCoplanarPoint(normal, _v3E.addVectors(sphericalPosition, center));
+        var rotation = _quaternion.setFromUnitVectors(normal, _v3E.set(0, 0, 1));
+        var rect = _box2.makeEmpty();
+        plane.projectPoint(box.min, _v3E).sub(center).applyQuaternion(rotation);
+        rect.expandByPoint(_v2.set(_v3E.x, _v3E.y));
+        plane.projectPoint(_v3C.copy(box.min).setX(box.max.x), _v3E).sub(center).applyQuaternion(rotation);
+        rect.expandByPoint(_v2.set(_v3E.x, _v3E.y));
+        plane.projectPoint(_v3C.copy(box.min).setY(box.max.y), _v3E).sub(center).applyQuaternion(rotation);
+        rect.expandByPoint(_v2.set(_v3E.x, _v3E.y));
+        plane.projectPoint(_v3C.copy(box.max).setZ(box.min.z), _v3E).sub(center).applyQuaternion(rotation);
+        rect.expandByPoint(_v2.set(_v3E.x, _v3E.y));
+        plane.projectPoint(_v3C.copy(box.min).setZ(box.max.z), _v3E).sub(center).applyQuaternion(rotation);
+        rect.expandByPoint(_v2.set(_v3E.x, _v3E.y));
+        plane.projectPoint(_v3C.copy(box.max).setY(box.min.y), _v3E).sub(center).applyQuaternion(rotation);
+        rect.expandByPoint(_v2.set(_v3E.x, _v3E.y));
+        plane.projectPoint(_v3C.copy(box.max).setX(box.min.x), _v3E).sub(center).applyQuaternion(rotation);
+        rect.expandByPoint(_v2.set(_v3E.x, _v3E.y));
+        plane.projectPoint(box.max, _v3E).sub(center).applyQuaternion(rotation);
+        rect.expandByPoint(_v2.set(_v3E.x, _v3E.y));
+        var centerOffset = _v3C.set((paddingRight - paddingLeft) * 0.5, (paddingTop - paddingBottom) * 0.5, 0);
+        rotation.setFromUnitVectors(_v3E.set(0, 0, 1), normal);
+        center.add(centerOffset.applyQuaternion(rotation));
+        var projectedSize = _box2.getSize(_v2);
+        var distance = this.getDistanceToFit(projectedSize.x + paddingRight + paddingLeft, projectedSize.y + paddingTop + paddingBottom, radius * 2);
+        this.moveTo(center.x, center.y, center.z, enableTransition);
         this.dollyTo(distance, enableTransition);
-        var boundingBoxCenter = boundingBox.getCenter(_v3A);
-        var cx = boundingBoxCenter.x - (paddingLeft * 0.5 - paddingRight * 0.5);
-        var cy = boundingBoxCenter.y + (paddingTop * 0.5 - paddingBottom * 0.5);
-        var cz = boundingBoxCenter.z;
-        this.moveTo(cx, cy, cz, enableTransition);
         this.normalizeRotations();
-        this.rotateTo(0, 90 * THREE.Math.DEG2RAD, enableTransition);
+        this.rotateTo(azimuthAngle, polarAngle, enableTransition);
     };
     CameraControls.prototype.setLookAt = function (positionX, positionY, positionZ, targetX, targetY, targetZ, enableTransition) {
         if (enableTransition === void 0) { enableTransition = false; }
